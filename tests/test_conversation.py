@@ -18,12 +18,18 @@ from borzomir_bot.bot import (
     media_type_for_file_path,
     normalize_image_prompt,
     select_largest_photo,
+    strip_voice_reply_request,
     user_requested_voice_reply,
 )
 from borzomir_bot.config import Settings
 from borzomir_bot.speech import normalize_tts_text, normalize_whisper_transcript
 from borzomir_bot.state import StateStore
-from borzomir_bot.telegram_api import MAX_TELEGRAM_MESSAGE_LENGTH, encode_multipart_form_data, split_telegram_message
+from borzomir_bot.telegram_api import (
+    MAX_TELEGRAM_MESSAGE_LENGTH,
+    TelegramError,
+    encode_multipart_form_data,
+    split_telegram_message,
+)
 
 
 class ConversationStoreTest(unittest.TestCase):
@@ -78,6 +84,12 @@ class SpeechHelpersTest(unittest.TestCase):
         self.assertIn("foo()", text)
         self.assertIn("ссылка", text)
         self.assertIn("фрагмент кода", text)
+
+    def test_normalize_tts_text_removes_voice_message_prefix(self):
+        self.assertEqual(
+            normalize_tts_text("[Голосовое сообщение 0:02] Привет! Я здесь."),
+            "Привет! Я здесь.",
+        )
 
 
 class ImageHelpersTest(unittest.TestCase):
@@ -316,7 +328,133 @@ class VoiceReplyRequestTest(unittest.TestCase):
     def test_voice_request_helper_requires_voice_and_action_words(self):
         self.assertTrue(user_requested_voice_reply("пожалуйста, ответь голосом"))
         self.assertTrue(user_requested_voice_reply("можешь voice ответить?"))
+        self.assertTrue(user_requested_voice_reply("озвучь"))
         self.assertFalse(user_requested_voice_reply("что такое голосовой интерфейс?"))
+
+    def test_voice_request_is_removed_before_model_prompt(self):
+        self.assertEqual(strip_voice_reply_request("Ответь голосовым привет"), "привет")
+        self.assertEqual(strip_voice_reply_request("Объясни Docker голосом"), "Объясни Docker")
+
+    def test_standalone_ozvuch_sends_previous_answer_as_voice(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = StateStore(str(Path(directory) / "state.sqlite3"), max_history_messages=16)
+            telegram = VoiceTelegram(voice_data=b"unused")
+            lm_studio = RecordingLMStudio(models=[])
+            speech = RecordingSpeech(transcript="unused", voice_answer=b"assistant-ogg")
+            app = BotApp(
+                settings=make_settings(database_path=state.database_path),
+                telegram=telegram,
+                lm_studio=lm_studio,
+                state=state,
+                speech=speech,
+            )
+            app.record_exchange(chat_id=100, user_content="привет", assistant_content="последний ответ")
+
+            app.handle_update(
+                {
+                    "message": {
+                        "message_id": 2,
+                        "chat": {"id": 100},
+                        "from": {"id": 92174505},
+                        "text": "Озвучь",
+                    }
+                }
+            )
+
+            self.assertEqual(lm_studio.chat_calls, [])
+            self.assertEqual(speech.synthesized, ["последний ответ"])
+            self.assertEqual(telegram.sent_voices[0]["voice_data"], b"assistant-ogg")
+            app.close()
+
+    def test_forbidden_voice_messages_fall_back_to_audio_upload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = StateStore(str(Path(directory) / "state.sqlite3"), max_history_messages=16)
+            telegram = VoiceTelegram(voice_data=b"unused", forbid_voice=True)
+            speech = RecordingSpeech(transcript="unused", voice_answer=b"assistant-ogg", audio_answer=b"assistant-mp3")
+            app = BotApp(
+                settings=make_settings(database_path=state.database_path),
+                telegram=telegram,
+                lm_studio=RecordingLMStudio(models=[]),
+                state=state,
+                speech=speech,
+            )
+
+            app.handle_update(
+                {
+                    "message": {
+                        "message_id": 1,
+                        "chat": {"id": 100},
+                        "from": {"id": 92174505},
+                        "text": "Ответь голосом привет",
+                    }
+                }
+            )
+
+            self.assertEqual(telegram.sent_voices, [])
+            self.assertEqual(speech.synthesized_audio, ["ok"])
+            self.assertEqual(telegram.sent_audios[0]["audio_data"], b"assistant-mp3")
+            self.assertEqual(telegram.sent_audios[0]["filename"], "answer.mp3")
+            self.assertEqual(telegram.sent_messages, [])
+            app.close()
+
+    def test_explicit_voice_request_sends_clean_prompt_to_model(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = StateStore(str(Path(directory) / "state.sqlite3"), max_history_messages=16)
+            telegram = VoiceTelegram(voice_data=b"unused")
+            lm_studio = RecordingLMStudio(models=[])
+            app = BotApp(
+                settings=make_settings(database_path=state.database_path),
+                telegram=telegram,
+                lm_studio=lm_studio,
+                state=state,
+                speech=RecordingSpeech(transcript="unused", voice_answer=b"assistant-ogg"),
+            )
+
+            app.handle_update(
+                {
+                    "message": {
+                        "message_id": 1,
+                        "chat": {"id": 100},
+                        "from": {"id": 92174505},
+                        "text": "Ответь голосовым привет",
+                    }
+                }
+            )
+
+            self.assertEqual(lm_studio.chat_calls[-1]["messages"][-1]["content"], "привет")
+            app.close()
+
+    def test_failed_audio_upload_falls_back_to_document_upload(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = StateStore(str(Path(directory) / "state.sqlite3"), max_history_messages=16)
+            telegram = VoiceTelegram(voice_data=b"unused", forbid_voice=True, forbid_audio=True)
+            speech = RecordingSpeech(transcript="unused", voice_answer=b"assistant-ogg", audio_answer=b"assistant-mp3")
+            app = BotApp(
+                settings=make_settings(database_path=state.database_path),
+                telegram=telegram,
+                lm_studio=RecordingLMStudio(models=[]),
+                state=state,
+                speech=speech,
+            )
+
+            app.handle_update(
+                {
+                    "message": {
+                        "message_id": 1,
+                        "chat": {"id": 100},
+                        "from": {"id": 92174505},
+                        "text": "Ответь голосом привет",
+                    }
+                }
+            )
+
+            self.assertEqual(telegram.sent_voices, [])
+            self.assertEqual(telegram.sent_audios, [])
+            self.assertEqual(telegram.sent_documents[0]["document_data"], b"assistant-mp3")
+            self.assertEqual(telegram.sent_documents[0]["filename"], "answer.mp3")
+            self.assertEqual(telegram.sent_documents[0]["media_type"], "audio/mpeg")
+            self.assertEqual(telegram.sent_messages, [])
+            app.close()
 
 
 class VoiceMessageTest(unittest.TestCase):
@@ -407,11 +545,15 @@ class RecordingTelegram(FakeTelegram):
 
 
 class VoiceTelegram(RecordingTelegram):
-    def __init__(self, *, voice_data):
+    def __init__(self, *, voice_data, forbid_voice=False, forbid_audio=False):
         super().__init__()
         self.voice_data = voice_data
+        self.forbid_voice = forbid_voice
+        self.forbid_audio = forbid_audio
         self.downloaded_paths = []
         self.sent_voices = []
+        self.sent_audios = []
+        self.sent_documents = []
 
     def get_file_path(self, file_id):
         return f"voice/{file_id}.ogg"
@@ -421,12 +563,48 @@ class VoiceTelegram(RecordingTelegram):
         return self.voice_data
 
     def send_voice(self, *, chat_id, voice_data, filename="answer.ogg", reply_to_message_id=None):
+        if self.forbid_voice:
+            raise TelegramError("HTTP 400 from Telegram sendVoice: VOICE_MESSAGES_FORBIDDEN")
         self.sent_voices.append(
             {
                 "chat_id": chat_id,
                 "voice_data": voice_data,
                 "filename": filename,
                 "reply_to_message_id": reply_to_message_id,
+            }
+        )
+
+    def send_audio(self, *, chat_id, audio_data, filename="answer.mp3", reply_to_message_id=None, title="Voice answer"):
+        if self.forbid_audio:
+            raise TelegramError("HTTP 400 from Telegram sendAudio: AUDIO_UPLOAD_FORBIDDEN")
+        self.sent_audios.append(
+            {
+                "chat_id": chat_id,
+                "audio_data": audio_data,
+                "filename": filename,
+                "reply_to_message_id": reply_to_message_id,
+                "title": title,
+            }
+        )
+
+    def send_document(
+        self,
+        *,
+        chat_id,
+        document_data,
+        filename="answer.mp3",
+        media_type="audio/mpeg",
+        reply_to_message_id=None,
+        caption=None,
+    ):
+        self.sent_documents.append(
+            {
+                "chat_id": chat_id,
+                "document_data": document_data,
+                "filename": filename,
+                "media_type": media_type,
+                "reply_to_message_id": reply_to_message_id,
+                "caption": caption,
             }
         )
 
@@ -447,11 +625,13 @@ class RecordingLMStudio:
 
 
 class RecordingSpeech:
-    def __init__(self, *, transcript, voice_answer):
+    def __init__(self, *, transcript, voice_answer, audio_answer=b"assistant-mp3"):
         self.transcript = transcript
         self.voice_answer = voice_answer
+        self.audio_answer = audio_answer
         self.transcribed = []
         self.synthesized = []
+        self.synthesized_audio = []
 
     def transcribe_telegram_voice(self, voice_data):
         self.transcribed.append(voice_data)
@@ -460,6 +640,10 @@ class RecordingSpeech:
     def synthesize_telegram_voice(self, text):
         self.synthesized.append(text)
         return self.voice_answer
+
+    def synthesize_telegram_audio(self, text):
+        self.synthesized_audio.append(text)
+        return self.audio_answer
 
 
 def make_settings(*, database_path: str) -> Settings:

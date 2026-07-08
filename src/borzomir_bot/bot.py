@@ -63,6 +63,21 @@ VOICE_REPLY_REQUEST_RE = re.compile(
     r"|\b(голос\w*|войс\w*|voice)\b"
     r".{0,80}\b(ответь|отвечай|пришли|отправь|скажи|запиши|озвучь|произнеси)\b"
 )
+VOICE_REDELIVERY_REQUEST_RE = re.compile(
+    r"^(озвучь|озвучь\s+это|скажи\s+голосом|голосом|войсом|voice)$"
+)
+VOICE_REPLY_COMMAND_CLEANUP_RE = re.compile(
+    r"^\s*(пожалуйста[, ]*)?"
+    r"(ответь|отвечай|пришли|отправь|скажи|запиши|озвучь|произнеси|можешь)"
+    r"\s+(мне\s+)?(голос\w*|войс\w*|voice)(\s+сообщени\w*)?"
+    r"[:,-]?\s*",
+    re.IGNORECASE,
+)
+VOICE_REPLY_SUFFIX_CLEANUP_RE = re.compile(
+    r"\s*(ответь|отвечай|пришли|отправь|скажи|запиши|озвучь|произнеси)?"
+    r"\s*(голосом|войсом|voice)\s*$",
+    re.IGNORECASE,
+)
 
 
 @dataclass
@@ -238,15 +253,19 @@ class BotApp:
             return
 
         if text:
+            if user_requested_last_answer_voice(text):
+                self.reply_last_answer_as_voice(chat_id=chat_id, message_id=message_id)
+                return
+            reply_as_voice = self.should_reply_with_voice(
+                source_is_voice=False,
+                user_requested_voice=user_requested_voice_reply(text),
+            )
             self.ask_model(
                 chat_id=chat_id,
                 user_id=user_id,
                 message_id=message_id,
-                prompt=text,
-                reply_as_voice=self.should_reply_with_voice(
-                    source_is_voice=False,
-                    user_requested_voice=user_requested_voice_reply(text),
-                ),
+                prompt=strip_voice_reply_request(text) if reply_as_voice else text,
+                reply_as_voice=reply_as_voice,
             )
 
     def handle_command(self, *, chat_id: int, user_id: int, message_id: int | None, text: str) -> None:
@@ -269,15 +288,16 @@ class BotApp:
             if not argument:
                 self.reply(chat_id, "Напишите вопрос после команды: /ask ваш вопрос", message_id)
                 return
+            reply_as_voice = self.should_reply_with_voice(
+                source_is_voice=False,
+                user_requested_voice=user_requested_voice_reply(argument),
+            )
             self.ask_model(
                 chat_id=chat_id,
                 user_id=user_id,
                 message_id=message_id,
-                prompt=argument,
-                reply_as_voice=self.should_reply_with_voice(
-                    source_is_voice=False,
-                    user_requested_voice=user_requested_voice_reply(argument),
-                ),
+                prompt=strip_voice_reply_request(argument) if reply_as_voice else argument,
+                reply_as_voice=reply_as_voice,
             )
         elif command == "/reset":
             self.conversations.reset(chat_id)
@@ -947,6 +967,14 @@ class BotApp:
         self.conversations.append(chat_id=chat_id, role="user", content=user_content)
         self.conversations.append(chat_id=chat_id, role="assistant", content=assistant_content)
 
+    def last_assistant_message(self, chat_id: int) -> str | None:
+        for message in reversed(self.conversations._history_for(chat_id)):
+            if message.get("role") == "assistant":
+                content = message.get("content", "").strip()
+                if content:
+                    return content
+        return None
+
     def maybe_summarize_chat(self, chat_id: int) -> None:
         if not self.settings.summary_enabled or self.settings.max_history_messages <= 0:
             return
@@ -987,6 +1015,16 @@ class BotApp:
         except TelegramError:
             LOGGER.exception("Failed to send Telegram message")
 
+    def reply_last_answer_as_voice(self, *, chat_id: int, message_id: int | None = None) -> None:
+        if self.settings.voice_reply_mode == "off":
+            self.reply(chat_id, "Голосовые ответы сейчас выключены в настройках бота.", message_id)
+            return
+        answer = self.last_assistant_message(chat_id)
+        if answer is None:
+            self.reply(chat_id, "Пока нечего озвучивать: я ещё не отвечал в этом чате.", message_id)
+            return
+        self.reply_voice_or_text(chat_id=chat_id, text=answer, message_id=message_id)
+
     def reply_voice_or_text(self, *, chat_id: int, text: str, message_id: int | None = None) -> None:
         if self.speech is None or self.settings.voice_reply_mode == "off":
             self.reply(chat_id, text, message_id)
@@ -1002,8 +1040,38 @@ class BotApp:
         except SpeechError as exc:
             LOGGER.warning("Local speech synthesis failed: %s", exc)
             self.reply(chat_id, text, message_id)
-        except TelegramError:
-            LOGGER.exception("Failed to send Telegram voice")
+        except TelegramError as exc:
+            if is_voice_messages_forbidden(exc):
+                LOGGER.warning("Telegram forbids voice messages, falling back to MP3 audio upload")
+                try:
+                    audio_data = self.speech.synthesize_telegram_audio(text)
+                    self.send_action(chat_id, "upload_document")
+                    self.telegram.send_audio(
+                        chat_id=chat_id,
+                        audio_data=audio_data,
+                        reply_to_message_id=message_id,
+                        title="Ответ голосом",
+                    )
+                    return
+                except SpeechError as audio_exc:
+                    LOGGER.warning("Local MP3 synthesis failed: %s", audio_exc)
+                except TelegramError:
+                    LOGGER.exception("Failed to send Telegram audio fallback")
+                    try:
+                        self.send_action(chat_id, "upload_document")
+                        self.telegram.send_document(
+                            chat_id=chat_id,
+                            document_data=audio_data,
+                            filename="answer.mp3",
+                            media_type="audio/mpeg",
+                            reply_to_message_id=message_id,
+                            caption="Ответ голосом",
+                        )
+                        return
+                    except TelegramError:
+                        LOGGER.exception("Failed to send Telegram document fallback")
+            else:
+                LOGGER.exception("Failed to send Telegram voice")
             self.reply(chat_id, text, message_id)
 
 
@@ -1221,7 +1289,27 @@ def format_bool(value: bool) -> str:
 
 
 def user_requested_voice_reply(text: str) -> bool:
-    return VOICE_REPLY_REQUEST_RE.search(text.lower().replace("ё", "е")) is not None
+    normalized = normalize_voice_request_text(text)
+    return VOICE_REPLY_REQUEST_RE.search(normalized) is not None or user_requested_last_answer_voice(normalized)
+
+
+def user_requested_last_answer_voice(text: str) -> bool:
+    return VOICE_REDELIVERY_REQUEST_RE.search(normalize_voice_request_text(text)) is not None
+
+
+def normalize_voice_request_text(text: str) -> str:
+    return re.sub(r"\s+", " ", text.lower().replace("ё", "е").strip(" .!?,:;"))
+
+
+def strip_voice_reply_request(text: str) -> str:
+    cleaned = VOICE_REPLY_COMMAND_CLEANUP_RE.sub("", text, count=1)
+    cleaned = VOICE_REPLY_SUFFIX_CLEANUP_RE.sub("", cleaned, count=1)
+    cleaned = cleaned.strip(" \t\n\r:,-")
+    return cleaned or text
+
+
+def is_voice_messages_forbidden(error: TelegramError) -> bool:
+    return "VOICE_MESSAGES_FORBIDDEN" in str(error)
 
 
 def _photo_score(photo: dict[str, Any]) -> int:

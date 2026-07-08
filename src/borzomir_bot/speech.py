@@ -66,10 +66,16 @@ class LocalSpeechService:
             return transcript
 
     def synthesize_telegram_voice(self, text: str) -> bytes:
+        return self._synthesize(text=text, output_name="answer.ogg", ffmpeg_args=["-c:a", "libopus", "-b:a", "32k", "-application", "voip"])
+
+    def synthesize_telegram_audio(self, text: str) -> bytes:
+        return self._synthesize(text=text, output_name="answer.mp3", ffmpeg_args=["-c:a", "libmp3lame", "-b:a", "64k"])
+
+    def _synthesize(self, *, text: str, output_name: str, ffmpeg_args: list[str]) -> bytes:
         with tempfile.TemporaryDirectory(prefix="borzomir-tts-") as directory_name:
             directory = Path(directory_name)
             wav_path = directory / "answer.wav"
-            ogg_path = directory / "answer.ogg"
+            output_path = directory / output_name
 
             command = [
                 self.settings.piper_bin,
@@ -90,18 +96,13 @@ class LocalSpeechService:
                     "-y",
                     "-i",
                     str(wav_path),
-                    "-c:a",
-                    "libopus",
-                    "-b:a",
-                    "32k",
-                    "-application",
-                    "voip",
-                    str(ogg_path),
+                    *ffmpeg_args,
+                    str(output_path),
                 ]
             )
-            if not ogg_path.exists():
-                raise SpeechError("Piper не создал OGG-файл для Telegram.")
-            return ogg_path.read_bytes()
+            if not output_path.exists():
+                raise SpeechError(f"Piper не создал файл {output_name} для Telegram.")
+            return output_path.read_bytes()
 
     def _run(self, command: list[str], *, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
         try:
@@ -138,6 +139,13 @@ def normalize_whisper_transcript(raw_text: str) -> str:
 
 def normalize_tts_text(text: str) -> str:
     cleaned = re.sub(r"```.*?```", " фрагмент кода ", text, flags=re.DOTALL)
+    cleaned = re.sub(
+        r"^\s*\[?\s*(голосовое\s+сообщение|voice\s+message|аудио(?:сообщение)?)"
+        r"(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\s*\]?\s*[:—-]?\s*",
+        "",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
     cleaned = re.sub(r"`([^`]+)`", r"\1", cleaned)
     cleaned = re.sub(r"https?://\S+", " ссылка ", cleaned)
     cleaned = re.sub(r"\s+", " ", cleaned)

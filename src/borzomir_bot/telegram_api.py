@@ -69,6 +69,45 @@ class TelegramClient:
             files={"voice": (filename, voice_data, "audio/ogg")},
         )
 
+    def send_audio(
+        self,
+        *,
+        chat_id: int,
+        audio_data: bytes,
+        filename: str = "answer.mp3",
+        reply_to_message_id: int | None = None,
+        title: str = "Voice answer",
+    ) -> None:
+        fields = {"chat_id": str(chat_id), "title": title}
+        if reply_to_message_id is not None:
+            fields["reply_parameters"] = json.dumps({"message_id": reply_to_message_id})
+        self._call_multipart(
+            "sendAudio",
+            fields=fields,
+            files={"audio": (filename, audio_data, "audio/mpeg")},
+        )
+
+    def send_document(
+        self,
+        *,
+        chat_id: int,
+        document_data: bytes,
+        filename: str = "answer.mp3",
+        media_type: str = "audio/mpeg",
+        reply_to_message_id: int | None = None,
+        caption: str | None = None,
+    ) -> None:
+        fields = {"chat_id": str(chat_id)}
+        if caption:
+            fields["caption"] = caption
+        if reply_to_message_id is not None:
+            fields["reply_parameters"] = json.dumps({"message_id": reply_to_message_id})
+        self._call_multipart(
+            "sendDocument",
+            fields=fields,
+            files={"document": (filename, document_data, media_type)},
+        )
+
     def send_chat_action(self, *, chat_id: int, action: str = "typing") -> None:
         self._call("sendChatAction", {"chat_id": chat_id, "action": action})
 
