@@ -1,0 +1,43 @@
+services:
+  bot:
+    build:
+      context: .
+    restart: unless-stopped
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:?Set TELEGRAM_BOT_TOKEN in .env}
+      ADMIN_USER_ID: ${ADMIN_USER_ID:-92174505}
+      ALLOWED_USER_IDS: ${ALLOWED_USER_IDS:-}
+      LM_STUDIO_BASE_URL: ${LM_STUDIO_BASE_URL:-http://host.docker.internal:1234/v1}
+      LM_STUDIO_MODEL: ${LM_STUDIO_MODEL:-qwen3.6-35b-a3b-uncensored-hauhaucs-aggressive}
+      DATABASE_PATH: ${DATABASE_PATH:-/data/borzomir.sqlite3}
+      SYSTEM_PROMPT: ${SYSTEM_PROMPT:-Ты полезный ассистент в Telegram. Отвечай по-русски, кратко и по делу, если пользователь не попросил иначе.}
+      MAX_HISTORY_MESSAGES: ${MAX_HISTORY_MESSAGES:-16}
+      SUMMARY_ENABLED: ${SUMMARY_ENABLED:-true}
+      SUMMARY_MAX_TOKENS: ${SUMMARY_MAX_TOKENS:-4096}
+      MAX_IMAGE_BYTES: ${MAX_IMAGE_BYTES:-20971520}
+      MAX_TEXT_DOCUMENT_BYTES: ${MAX_TEXT_DOCUMENT_BYTES:-1048576}
+      LM_STUDIO_TEMPERATURE: ${LM_STUDIO_TEMPERATURE:-0.7}
+      LM_STUDIO_MAX_TOKENS: ${LM_STUDIO_MAX_TOKENS:-4096}
+      REQUEST_TIMEOUT_SECONDS: ${REQUEST_TIMEOUT_SECONDS:-180}
+      TELEGRAM_POLL_TIMEOUT_SECONDS: ${TELEGRAM_POLL_TIMEOUT_SECONDS:-50}
+      VOICE_INPUT_ENABLED: ${VOICE_INPUT_ENABLED:-true}
+      VOICE_REPLY_MODE: ${VOICE_REPLY_MODE:-voice-input}
+      MAX_VOICE_BYTES: ${MAX_VOICE_BYTES:-20971520}
+      MAX_VOICE_SECONDS: ${MAX_VOICE_SECONDS:-120}
+      MAX_TTS_CHARS: ${MAX_TTS_CHARS:-2000}
+      SPEECH_TIMEOUT_SECONDS: ${SPEECH_TIMEOUT_SECONDS:-180}
+      WHISPER_BIN: ${WHISPER_BIN:-/usr/local/bin/whisper-cli}
+      WHISPER_MODEL_PATH: ${WHISPER_MODEL_PATH:-/models/whisper/ggml-small.bin}
+      WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-ru}
+      PIPER_BIN: ${PIPER_BIN:-/usr/local/bin/piper}
+      PIPER_MODEL_PATH: ${PIPER_MODEL_PATH:-/models/piper/ru_RU-dmitri-medium.onnx}
+      PIPER_CONFIG_PATH: ${PIPER_CONFIG_PATH:-/models/piper/ru_RU-dmitri-medium.onnx.json}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - bot-data:/data
+      - ./models:/models:ro
+
+volumes:
+  bot-data:
