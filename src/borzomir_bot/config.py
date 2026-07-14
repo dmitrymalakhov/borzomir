@@ -12,8 +12,8 @@ DEFAULT_DATABASE_PATH = "/data/borzomir.sqlite3"
 DEFAULT_WHISPER_BIN = "/usr/local/bin/whisper-cli"
 DEFAULT_WHISPER_MODEL_PATH = "/models/whisper/ggml-small.bin"
 DEFAULT_PIPER_BIN = "/usr/local/bin/piper"
-DEFAULT_PIPER_MODEL_PATH = "/models/piper/ru_RU-dmitri-medium.onnx"
-DEFAULT_PIPER_CONFIG_PATH = "/models/piper/ru_RU-dmitri-medium.onnx.json"
+DEFAULT_PIPER_MODEL_PATH = "/models/piper/ru_RU-ruslan-medium.onnx"
+DEFAULT_PIPER_CONFIG_PATH = "/models/piper/ru_RU-ruslan-medium.onnx.json"
 VOICE_REPLY_MODES = frozenset({"off", "voice-input", "always"})
 DEFAULT_SYSTEM_PROMPT = (
     "Ты полезный ассистент в Telegram. Отвечай по-русски, кратко и по делу, "

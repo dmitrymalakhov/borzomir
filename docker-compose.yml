@@ -30,8 +30,8 @@ services:
       WHISPER_MODEL_PATH: ${WHISPER_MODEL_PATH:-/models/whisper/ggml-small.bin}
       WHISPER_LANGUAGE: ${WHISPER_LANGUAGE:-ru}
       PIPER_BIN: ${PIPER_BIN:-/usr/local/bin/piper}
-      PIPER_MODEL_PATH: ${PIPER_MODEL_PATH:-/models/piper/ru_RU-dmitri-medium.onnx}
-      PIPER_CONFIG_PATH: ${PIPER_CONFIG_PATH:-/models/piper/ru_RU-dmitri-medium.onnx.json}
+      PIPER_MODEL_PATH: ${PIPER_MODEL_PATH:-/models/piper/ru_RU-ruslan-medium.onnx}
+      PIPER_CONFIG_PATH: ${PIPER_CONFIG_PATH:-/models/piper/ru_RU-ruslan-medium.onnx.json}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
     extra_hosts:
       - "host.docker.internal:host-gateway"

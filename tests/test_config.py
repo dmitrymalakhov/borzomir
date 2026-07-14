@@ -28,13 +28,13 @@ class ConfigTest(unittest.TestCase):
         self.assertTrue(settings.is_user_allowed(100))
         self.assertFalse(settings.is_user_allowed(300))
 
-    def test_voice_settings_default_to_local_male_piper_voice(self):
+    def test_voice_settings_default_to_local_ruslan_piper_voice(self):
         settings = load_settings({"TELEGRAM_BOT_TOKEN": "token"})
 
         self.assertTrue(settings.voice_input_enabled)
         self.assertEqual(settings.voice_reply_mode, "voice-input")
         self.assertEqual(settings.whisper_language, "ru")
-        self.assertIn("ru_RU-dmitri-medium", settings.piper_model_path)
+        self.assertIn("ru_RU-ruslan-medium", settings.piper_model_path)
 
     def test_voice_reply_mode_is_validated(self):
         with self.assertRaises(ConfigError):

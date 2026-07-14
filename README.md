@@ -35,12 +35,12 @@ on the host machine.
      https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin
 
    curl -L \
-     -o models/piper/ru_RU-dmitri-medium.onnx \
-     https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/dmitri/medium/ru_RU-dmitri-medium.onnx
+     -o models/piper/ru_RU-ruslan-medium.onnx \
+     https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/ruslan/medium/ru_RU-ruslan-medium.onnx
 
    curl -L \
-     -o models/piper/ru_RU-dmitri-medium.onnx.json \
-     https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/dmitri/medium/ru_RU-dmitri-medium.onnx.json
+     -o models/piper/ru_RU-ruslan-medium.onnx.json \
+     https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU/ruslan/medium/ru_RU-ruslan-medium.onnx.json
    ```
 
    Speech recognition and synthesis run locally in the Docker container. The
@@ -93,8 +93,8 @@ unauthorized users.
 | `WHISPER_MODEL_PATH` | `/models/whisper/ggml-small.bin` | Local Whisper ggml model path. |
 | `WHISPER_LANGUAGE` | `ru` | Recognition language hint passed to Whisper. |
 | `PIPER_BIN` | `/usr/local/bin/piper` | Local Piper CLI path. |
-| `PIPER_MODEL_PATH` | `/models/piper/ru_RU-dmitri-medium.onnx` | Local Piper voice model path. |
-| `PIPER_CONFIG_PATH` | `/models/piper/ru_RU-dmitri-medium.onnx.json` | Local Piper voice config path. |
+| `PIPER_MODEL_PATH` | `/models/piper/ru_RU-ruslan-medium.onnx` | Local Piper voice model path. |
+| `PIPER_CONFIG_PATH` | `/models/piper/ru_RU-ruslan-medium.onnx.json` | Local Piper voice config path. |
 | `LOG_LEVEL` | `INFO` | Python logging level. |
 
 ## Bot Commands
@@ -170,7 +170,7 @@ The bot supports Telegram voice messages without external speech APIs:
 - `whisper.cpp` transcribes the WAV locally.
 - The transcript is sent to LM Studio like a normal user message.
 - Piper synthesizes the answer locally with the default male Russian voice
-  `ru_RU-dmitri-medium`.
+  `ru_RU-ruslan-medium`.
 - `ffmpeg` converts the Piper WAV output back to OGG/Opus for Telegram
   `sendVoice`.
 
